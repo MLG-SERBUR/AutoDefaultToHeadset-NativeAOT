@@ -28,7 +28,7 @@ bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AutoDefaultToHeadset.Nati
 
 ```cmd
 install.bat
-:: picks output/input from active list, stores --render-match "Headphones (Xbox Controller)" --capture-match "Headset Microphone (Xbox Controller)"
+:: terminates running instances, deletes/cleans W:\_programs\AutoDefaultToHeadset, installs binary, and configures Startup shortcut
 ```
 
 Manual:

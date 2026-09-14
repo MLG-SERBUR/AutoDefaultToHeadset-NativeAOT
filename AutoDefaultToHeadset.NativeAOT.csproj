@@ -13,7 +13,7 @@
     <DebugType>none</DebugType>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <PublishTrimmed>true</PublishTrimmed>
-    <!-- WinExe = no console window; add --verbose to AllocConsole for diagnostics -->
+    <!-- WinExe = no console window; add verbose flag to AllocConsole for diagnostics -->
     <UseWindowsForms>false</UseWindowsForms>
     <UseWPF>false</UseWPF>
   </PropertyGroup>

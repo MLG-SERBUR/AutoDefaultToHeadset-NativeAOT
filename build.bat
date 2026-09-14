@@ -14,6 +14,6 @@ echo.
 echo Publish output:
 for %%F in (bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\*.exe) do echo  %%~fF  %%~zF bytes
 echo.
-echo Copy to W:\_programs\AutoDefaultToHeadset.NativeAOT if you keep separate path:
-echo  copy /Y bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AutoDefaultToHeadset.NativeAOT.exe W:\_programs\AutoDefaultToHeadset.NativeAOT\
+echo To install into W:\_programs\AutoDefaultToHeadset:
+echo  install.bat
 pause
