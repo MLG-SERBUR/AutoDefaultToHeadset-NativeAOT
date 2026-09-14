@@ -11,19 +11,15 @@ if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 for %%I in ("%SCRIPT_DIR%") do set "SCRIPT_DIR=%%~fI"
 
 if "%~1"=="" (
-  for %%F in (bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\*.exe) do (
+  if exist "%SCRIPT_DIR%\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AutoDefaultToHeadset.NativeAOT.exe" (
+    set "FOUND_EXE=%SCRIPT_DIR%\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AutoDefaultToHeadset.NativeAOT.exe"
+    goto :found
+  )
+  for %%F in ("%SCRIPT_DIR%\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\*.exe") do (
     set "FOUND_EXE=%%~fF"
     goto :found
   )
-  for %%F in (bin\Release\net8.0-windows10.0.19041.0\win-x64\*.exe) do (
-    set "FOUND_EXE=%%~fF"
-    goto :found
-  )
-  for %%F in ("%~dp0*.exe") do (
-    set "FOUND_EXE=%%~fF"
-    goto :found
-  )
-  for %%F in (*.exe) do (
+  for %%F in ("%SCRIPT_DIR%\*.exe") do (
     set "FOUND_EXE=%%~fF"
     goto :found
   )

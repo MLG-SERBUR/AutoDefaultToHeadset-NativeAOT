@@ -5,9 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- NativeAOT: low memory, no JIT, no console host, ~5-10MB RAM vs 30MB -->
-    <PublishAot>true</PublishAot>
+    <!-- Trimmed Single-File: low memory, self-contained, no C++ linker required -->
+    <PublishAot>false</PublishAot>
+    <PublishSingleFile>true</PublishSingleFile>
     <TrimMode>partial</TrimMode>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
     <StripSymbols>true</StripSymbols>
     <DebugType>none</DebugType>
