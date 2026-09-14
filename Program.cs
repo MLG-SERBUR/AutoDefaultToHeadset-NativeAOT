@@ -554,9 +554,9 @@ internal static class Program
                 throw new InvalidOperationException("Cannot locate running executable path.");
             }
 
-            CreateStartupShortcut(exePath, arguments);
+            CreateScheduledTaskAndARP(exePath, arguments);
             Console.WriteLine();
-            Console.WriteLine("Created Startup shortcut.");
+            Console.WriteLine("Created Scheduled Task and Add/Remove Programs entry.");
             Console.WriteLine("Arguments: " + arguments);
 
             Process.Start(new ProcessStartInfo
@@ -621,18 +621,37 @@ internal static class Program
             return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
         }
 
-        private static void CreateStartupShortcut(string exePath, string arguments)
+        private static void CreateScheduledTaskAndARP(string exePath, string arguments)
         {
-            var startup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            var link = Path.Combine(startup, "AutoDefaultToHeadset.lnk");
-            var shellType = Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!;
-            dynamic shell = Activator.CreateInstance(shellType)!;
-            dynamic shortcut = shell.CreateShortcut(link);
-            shortcut.TargetPath = exePath;
-            shortcut.Arguments = arguments;
-            shortcut.WorkingDirectory = Path.GetDirectoryName(exePath) ?? Environment.CurrentDirectory;
-            shortcut.IconLocation = exePath;
-            shortcut.Save();
+            var taskName = "AutoDefaultToHeadset.NativeAOT";
+            var schtasksArgs = "/Create /SC ONLOGON /TN \"" + taskName + "\" /TR \"\\\"" + exePath + "\\\" " + arguments + "\" /RL HIGHEST /F";
+            
+            var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = schtasksArgs,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            process?.WaitForExit();
+
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + taskName);
+                if (key != null)
+                {
+                    key.SetValue("DisplayName", "AutoDefaultToHeadset (NativeAOT)");
+                    key.SetValue("DisplayIcon", exePath);
+                    key.SetValue("UninstallString", "\"" + Path.Combine(Path.GetDirectoryName(exePath) ?? string.Empty, "uninstall.bat") + "\"");
+                    key.SetValue("Publisher", "MLG-SERBUR");
+                    key.SetValue("NoModify", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                    key.SetValue("NoRepair", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteError("Failed to create ARP registry keys (requires admin).", ex);
+            }
         }
 
         private void PrintDevices(EDataFlow flow, string label)
@@ -1156,7 +1175,7 @@ internal static class Program
         Console.WriteLine("Usage: AutoDefaultToHeadset.exe [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --install               Select devices, create Startup shortcut, and launch.");
+        Console.WriteLine("  --install               Select devices, create Scheduled task, Add/Remove entry, and launch.");
         Console.WriteLine("  --list-devices          List output/input endpoint names and ids, then exit.");
         Console.WriteLine("  --match <text>          Match same exact friendly name for output and input.");
         Console.WriteLine("  --render-match <text>   Match active output device by exact friendly name (case-insensitive).");

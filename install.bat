@@ -95,6 +95,7 @@ if /i not "%EXE_SRC_DIR%"=="%TARGET_DIR%\" (
   )
   if exist "%SCRIPT_DIR%\README.md" copy /y "%SCRIPT_DIR%\README.md" "%TARGET_DIR%\" >nul 2>&1
   if exist "%SCRIPT_DIR%\install.bat" copy /y "%SCRIPT_DIR%\install.bat" "%TARGET_DIR%\" >nul 2>&1
+  if exist "%SCRIPT_DIR%\uninstall.bat" copy /y "%SCRIPT_DIR%\uninstall.bat" "%TARGET_DIR%\" >nul 2>&1
 )
 
 if /i not "%EXE_NAME%"=="AutoDefaultToHeadset.exe" (
@@ -103,7 +104,7 @@ if /i not "%EXE_NAME%"=="AutoDefaultToHeadset.exe" (
 
 set "INSTALLED_EXE=%TARGET_DIR%\%EXE_NAME%"
 echo.
-echo Configuring startup shortcut and device selection...
+echo Configuring scheduled task and device selection...
 "%INSTALLED_EXE%" --install
 if %ERRORLEVEL% EQU 0 (
   echo.

@@ -24,11 +24,19 @@ Output:
 bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\AutoDefaultToHeadset.NativeAOT.exe  ~8 MB
 ```
 
-## Install (exact name, persistent)
+## Install / Uninstall
+
+Must run `install.bat` as Administrator.
 
 ```cmd
 install.bat
-:: terminates running instances, deletes/cleans W:\_programs\AutoDefaultToHeadset, installs binary, and configures Startup shortcut
+:: terminates running instances, copies files to W:\_programs\AutoDefaultToHeadset
+:: installs Scheduled Task (on logon, highest privileges), and registers in Add/Remove Programs
+```
+
+To uninstall, use **Add/Remove Programs** in Windows Settings, or run:
+```cmd
+W:\_programs\AutoDefaultToHeadset\uninstall.bat
 ```
 
 Manual:
@@ -36,7 +44,7 @@ Manual:
 ```cmd
 AutoDefaultToHeadset.NativeAOT.exe --render-match "Headphones (Xbox Controller)" --capture-match "Headset Microphone (Xbox Controller)"
 AutoDefaultToHeadset.NativeAOT.exe --verbose --list-devices  :: diagnostics with console
-AutoDefaultToHeadset.NativeAOT.exe --background --render-match "Headphones (Xbox Controller)" --capture-match "Headset Microphone (Xbox Controller)"  :: hidden background (Task Scheduler /RL HIGHEST for admin)
+AutoDefaultToHeadset.NativeAOT.exe --background --render-match "Headphones (Xbox Controller)" --capture-match "Headset Microphone (Xbox Controller)"
 ```
 
 Diagnostics (verbose allocates console):
@@ -46,13 +54,13 @@ Diagnostics (verbose allocates console):
 [INFO] Set eConsole/eMultimedia/eCommunications via IPolicyConfig verify=OK
 ```
 
-## Admin
+## Admin & Background Execution
 
-`IPolicyConfig::SetDefaultEndpoint` needs elevated token on Win11 25H2 (26200) → `Admin: False` → `0x80070005`. Run as Administrator or:
+On newer Windows 11 builds (24H2 / build 26100+), the undocumented `IPolicyConfig::SetDefaultEndpoint` COM interface requires an elevated token. Without it, switching fails with `0x80070005 (Access Denied)`.
 
-```cmd
-schtasks /Create /SC ONLOGON /TN "AutoDefaultToHeadset.NativeAOT" /TR "\"C:\path\AutoDefaultToHeadset.NativeAOT.exe\" --background --render-match \"Headphones (Xbox Controller)\" --capture-match \"Headset Microphone (Xbox Controller)\"" /RL HIGHEST /F
-```
+**Do not use a Windows Service.** Services run in Session 0, which isolates audio routing. Core Audio (`IMMDeviceEnumerator` callbacks and default endpoints) are bound to the active user's session (Session 1+). 
+
+**Solution:** Use Windows Task Scheduler. The installer automatically creates a task to run the app at logon with `/RL HIGHEST` inside the user session, bypassing UAC while retaining audio device access.
 
 ## Memory
 
