@@ -481,10 +481,10 @@ internal static class Program
                     LogCurrentDefaults("after " + source + " attempt " + (attempt + 1));
 
                     // check if verification shows our device is now default
-                    var renderOk = render == null || IsDefault(render.Id, EDataFlow.eRender, ERole.eConsole) || IsDefault(render.Id, EDataFlow.eRender, ERole.eMultimedia) || IsDefault(render.Id, EDataFlow.eRender, ERole.eCommunications);
-                    var captureOk = capture == null || IsDefault(capture.Id, EDataFlow.eCapture, ERole.eConsole) || IsDefault(capture.Id, EDataFlow.eCapture, ERole.eCommunications);
+                    var renderOk = render == null || IsDefaultForAllRoles(render);
+                    var captureOk = capture == null || IsDefaultForAllRoles(capture);
 
-                    if (didWork && renderOk && captureOk)
+                    if (renderOk && captureOk)
                     {
                         break;
                     }
@@ -895,8 +895,11 @@ internal static class Program
                 {
                     key.SetValue("DisplayName", "AutoDefaultToHeadset (NativeAOT)");
                     key.SetValue("DisplayIcon", exePath);
-                    key.SetValue("UninstallString", "\"" + Path.Combine(Path.GetDirectoryName(exePath) ?? string.Empty, "uninstall.bat") + "\"");
+                    var uninstallPath = Path.Combine(Path.GetDirectoryName(exePath) ?? string.Empty, "uninstall.bat");
+                    key.SetValue("UninstallString", "cmd.exe /c \"\"" + uninstallPath + "\"\"");
+                    key.SetValue("QuietUninstallString", "cmd.exe /c \"\"" + uninstallPath + "\"\"");
                     key.SetValue("Publisher", "MLG-SERBUR");
+                    key.SetValue("DisplayVersion", "1.0");
                     key.SetValue("NoModify", 1, Microsoft.Win32.RegistryValueKind.DWord);
                     key.SetValue("NoRepair", 1, Microsoft.Win32.RegistryValueKind.DWord);
                 }
@@ -982,10 +985,25 @@ internal static class Program
 
         private bool SetDefaultForAllRoles(AudioDevice device, string source)
         {
-            var okConsole = SetDefault(device, ERole.eConsole, source);
-            var okMultimedia = SetDefault(device, ERole.eMultimedia, source);
-            var okComm = SetDefault(device, ERole.eCommunications, source);
-            return okConsole || okMultimedia || okComm;
+            var changed = false;
+            foreach (var role in new[] { ERole.eConsole, ERole.eMultimedia, ERole.eCommunications })
+            {
+                if (IsDefault(device.Id, device.Flow, role))
+                {
+                    continue;
+                }
+
+                changed |= SetDefault(device, role, source);
+            }
+
+            return changed;
+        }
+
+        private bool IsDefaultForAllRoles(AudioDevice device)
+        {
+            return IsDefault(device.Id, device.Flow, ERole.eConsole) &&
+                   IsDefault(device.Id, device.Flow, ERole.eMultimedia) &&
+                   IsDefault(device.Id, device.Flow, ERole.eCommunications);
         }
 
         private bool SetDefault(AudioDevice device, ERole role, string source)
