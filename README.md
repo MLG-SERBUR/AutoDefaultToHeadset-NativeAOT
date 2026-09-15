@@ -1,21 +1,21 @@
 # AutoDefaultToHeadset.NativeAOT
 
-Low-memory fork of AutoDefaultToHeadset. WinExe (no console window), exact friendly-name only, no endpoint IDs. The current project emits a trimmed, self-contained single-file CoreCLR executable; NativeAOT needs the Visual Studio C++ linker before it can be enabled.
+Low-memory fork of AutoDefaultToHeadset. WinExe (no console window), exact friendly-name only, no endpoint IDs. The project emits a trimmed NativeAOT executable.
 
 ## Why
 
 - Endpoint IDs (`{0.0.0.00000000}.{guid}`) rotate on Bluetooth re-pair / Xbox controller reconnect → stale `exists(all)=False` → does nothing.
 - Friendly name (`Headphones (Xbox Controller)` / `Headset Microphone (Xbox Controller)`) stable → exact `Name.Equals(match, OrdinalIgnoreCase)` only.
-- `WinExe` + `InvariantGlobalization` + trimming keeps the app hidden and minimizes deployment size. NativeAOT removes JIT/runtime overhead after the C++ linker prerequisite is installed.
+- `WinExe` + `InvariantGlobalization` + trimming keeps the app hidden and minimizes deployment size. NativeAOT removes JIT/runtime overhead.
 
 ## Build
 
-Requires .NET 8 SDK + Windows SDK 10.0.19041+.
+Requires .NET 8 SDK + Visual Studio 2022 or later with Desktop development with C++ + Windows SDK 10.0.19041+.
 
 ```cmd
 build.bat
 :: or
-dotnet publish -c Release -r win-x64 --self-contained true
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:PublishSingleFile=false -p:OptimizationPreference=Size
 ```
 
 Output:

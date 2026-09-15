@@ -5,9 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- Trimmed Single-File: low memory, self-contained, no C++ linker required -->
-    <PublishAot>false</PublishAot>
-    <PublishSingleFile>true</PublishSingleFile>
+    <!-- NativeAOT: no CoreCLR/JIT runtime in the resident process. -->
+    <PublishAot>true</PublishAot>
+    <!-- NativeAOT already produces a native executable; these modes conflict. -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <OptimizationPreference>Size</OptimizationPreference>
     <TrimMode>partial</TrimMode>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <InvariantGlobalization>true</InvariantGlobalization>
