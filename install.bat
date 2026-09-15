@@ -1,6 +1,6 @@
 @echo off
 setlocal
-REM install.bat - NativeAOT: install into W:\_programs\AutoDefaultToHeadset, pick friendly name, create Startup shortcut
+REM install.bat - copy application files, then run install.ps1 for device selection and registration
 REM Usage: double-click, or: install.bat [Path\To\Exe]
 
 set "TARGET_DIR=W:\_programs\AutoDefaultToHeadset"
@@ -54,7 +54,7 @@ if exist "%TARGET_DIR%" (
   if /i "%SCRIPT_DIR%"=="%TARGET_DIR%" (
     echo Cleaning existing files in "%TARGET_DIR%"...
     for /f "delims=" %%F in ('dir /b /a-d "%TARGET_DIR%"') do (
-      if /i not "%%F"=="install.bat" del /f /q "%TARGET_DIR%\%%F" >nul 2>&1
+      if /i not "%%F"=="install.bat" if /i not "%%F"=="install.ps1" del /f /q "%TARGET_DIR%\%%F" >nul 2>&1
     )
     for /f "delims=" %%D in ('dir /b /ad "%TARGET_DIR%"') do (
       rd /s /q "%TARGET_DIR%\%%D" >nul 2>&1
@@ -91,6 +91,7 @@ if /i not "%EXE_SRC_DIR%"=="%TARGET_DIR%\" (
   )
   if exist "%SCRIPT_DIR%\README.md" copy /y "%SCRIPT_DIR%\README.md" "%TARGET_DIR%\" >nul 2>&1
   if exist "%SCRIPT_DIR%\install.bat" copy /y "%SCRIPT_DIR%\install.bat" "%TARGET_DIR%\" >nul 2>&1
+  if exist "%SCRIPT_DIR%\install.ps1" copy /y "%SCRIPT_DIR%\install.ps1" "%TARGET_DIR%\" >nul 2>&1
   if exist "%SCRIPT_DIR%\uninstall.bat" copy /y "%SCRIPT_DIR%\uninstall.bat" "%TARGET_DIR%\" >nul 2>&1
 )
 
@@ -101,7 +102,7 @@ if /i not "%EXE_NAME%"=="AutoDefaultToHeadset.exe" (
 set "INSTALLED_EXE=%TARGET_DIR%\%EXE_NAME%"
 echo.
 echo Configuring scheduled task and device selection...
-"%INSTALLED_EXE%" --install
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%TARGET_DIR%\install.ps1" -ExePath "%INSTALLED_EXE%"
 if %ERRORLEVEL% EQU 0 (
   echo.
   echo Installer completed successfully.

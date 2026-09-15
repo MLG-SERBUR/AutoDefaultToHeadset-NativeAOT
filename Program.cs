@@ -83,13 +83,6 @@ internal static class Program
         {
             using var controller = new AudioController(options);
 
-            if (options.InstallStartup)
-            {
-                EnsureConsole();
-                controller.RunStartupInstaller();
-                return 0;
-            }
-
             if (options.ListDevices)
             {
                 controller.PrintDevices();
@@ -229,7 +222,6 @@ internal static class Program
         public bool Verbose { get; private set; }
         public bool ReplaceExisting { get; private set; } = true;
         public bool ListDevices { get; private set; }
-        public bool InstallStartup { get; private set; }
         public bool ShowHelp { get; private set; }
 
         public string RenderDescription => string.Join(", ", RenderMatches.Select(s => "'" + s + "'"));
@@ -288,9 +280,6 @@ internal static class Program
                     case "--list-devices":
                         options.ListDevices = true;
                         break;
-                    case "--install":
-                        options.InstallStartup = true;
-                        break;
                     case "--replace-existing":
                         options.ReplaceExisting = true;
                         break;
@@ -308,7 +297,7 @@ internal static class Program
                             argument.Equals("--capture-id", StringComparison.OrdinalIgnoreCase) ||
                             argument.Equals("--id", StringComparison.OrdinalIgnoreCase))
                         {
-                            throw new ArgumentException(argument + " no longer supported. Use --render-match / --capture-match with exact friendly name. Run --install to recreate shortcut.");
+                            throw new ArgumentException(argument + " no longer supported. Use --render-match / --capture-match with exact friendly name. Run install.bat to recreate the scheduled task.");
                         }
                         throw new ArgumentException("Unknown argument: " + argument);
                 }
@@ -769,145 +758,6 @@ internal static class Program
         {
             PrintDevices(EDataFlow.eRender, "Output");
             PrintDevices(EDataFlow.eCapture, "Input");
-        }
-
-        public void RunStartupInstaller()
-        {
-            var renderDevices = EnumerateDevices(EDataFlow.eRender, DeviceState.All);
-            var captureDevices = EnumerateDevices(EDataFlow.eCapture, DeviceState.All);
-
-            var render = PromptForDevice("output", renderDevices);
-            var capture = PromptForDevice("input", captureDevices);
-            var fallbackRender = PromptForDevice("fallback output", renderDevices);
-            var fallbackCapture = PromptForDevice("fallback input", captureDevices);
-            var disconnectRender = PromptForDevice("Virtual Desktop output to watch for disconnect", renderDevices);
-
-            // exact name only, no ID mode
-            var renderMatch = render.Name;
-            var captureMatch = capture.Name;
-            var fallbackRenderMatch = fallbackRender.Name;
-            var fallbackCaptureMatch = fallbackCapture.Name;
-            var disconnectRenderMatch = disconnectRender.Name;
-            Console.WriteLine();
-            Console.WriteLine("Using exact friendly name (persistent):");
-            Console.WriteLine("  Render: " + renderMatch);
-            Console.WriteLine("  Capture: " + captureMatch);
-            Console.WriteLine("  Fallback render: " + fallbackRenderMatch);
-            Console.WriteLine("  Fallback capture: " + fallbackCaptureMatch);
-            Console.WriteLine("  Disconnect render watch: " + disconnectRenderMatch);
-            var arguments = "--background --render-match " + Quote(renderMatch) +
-                            " --capture-match " + Quote(captureMatch) +
-                            " --fallback-render-match " + Quote(fallbackRenderMatch) +
-                            " --fallback-capture-match " + Quote(fallbackCaptureMatch) +
-                            " --disconnect-render-match " + Quote(disconnectRenderMatch);
-
-            var exePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(exePath))
-            {
-                throw new InvalidOperationException("Cannot locate running executable path.");
-            }
-
-            CreateScheduledTaskAndARP(exePath, arguments);
-            Console.WriteLine();
-            Console.WriteLine("Created Scheduled Task and Add/Remove Programs entry.");
-            Console.WriteLine("Arguments: " + arguments);
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = exePath,
-                Arguments = arguments,
-                WorkingDirectory = Path.GetDirectoryName(exePath) ?? Environment.CurrentDirectory,
-                WindowStyle = ProcessWindowStyle.Hidden,
-                UseShellExecute = true
-            });
-            Console.WriteLine("Launched AutoDefaultToHeadset.");
-        }
-
-        private static AudioDevice PromptForDevice(string label, IReadOnlyList<AudioDevice> devices)
-        {
-            var sorted = devices
-                .OrderBy(device => device.State == DeviceState.Active ? 0 : device.State == DeviceState.Unplugged ? 1 : 2)
-                .ThenByDescending(device => device.Name.Contains("headset", StringComparison.OrdinalIgnoreCase))
-                .ThenByDescending(device => device.Name.Contains("headphones", StringComparison.OrdinalIgnoreCase))
-                .ThenBy(device => device.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            Console.WriteLine();
-            Console.WriteLine("Select " + label + " device:");
-            for (var i = 0; i < sorted.Count; i++)
-            {
-                var device = sorted[i];
-                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "  {0}. [{1}] {2}", i + 1, device.State, device.Name));
-                Console.WriteLine("     " + device.Id);
-            }
-
-            while (true)
-            {
-                Console.Write(label + " number: ");
-                var input = Console.ReadLine();
-                if (int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) &&
-                    index >= 1 &&
-                    index <= sorted.Count)
-                {
-                    return sorted[index - 1];
-                }
-
-                Console.WriteLine("Invalid selection.");
-            }
-        }
-
-        private static string PromptForText(string prompt, string suggestion)
-        {
-            Console.Write(prompt + " [" + suggestion + "]: ");
-            var value = Console.ReadLine();
-            return string.IsNullOrWhiteSpace(value) ? suggestion : value.Trim();
-        }
-
-        private static string SuggestMatch(string name)
-        {
-            // exact mode: return full friendly name, not substring inside ()
-            return name;
-        }
-
-        private static string Quote(string value)
-        {
-            return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
-        }
-
-        private static void CreateScheduledTaskAndARP(string exePath, string arguments)
-        {
-            var taskName = "AutoDefaultToHeadset.NativeAOT";
-            var schtasksArgs = "/Create /SC ONLOGON /TN \"" + taskName + "\" /TR \"\\\"" + exePath + "\\\" " + arguments + "\" /RL HIGHEST /F";
-            
-            var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "schtasks.exe",
-                Arguments = schtasksArgs,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
-            process?.WaitForExit();
-
-            try
-            {
-                using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\" + taskName);
-                if (key != null)
-                {
-                    key.SetValue("DisplayName", "AutoDefaultToHeadset (NativeAOT)");
-                    key.SetValue("DisplayIcon", exePath);
-                    var uninstallPath = Path.Combine(Path.GetDirectoryName(exePath) ?? string.Empty, "uninstall.bat");
-                    key.SetValue("UninstallString", "cmd.exe /c \"\"" + uninstallPath + "\"\"");
-                    key.SetValue("QuietUninstallString", "cmd.exe /c \"\"" + uninstallPath + "\"\"");
-                    key.SetValue("Publisher", "MLG-SERBUR");
-                    key.SetValue("DisplayVersion", "1.0");
-                    key.SetValue("NoModify", 1, Microsoft.Win32.RegistryValueKind.DWord);
-                    key.SetValue("NoRepair", 1, Microsoft.Win32.RegistryValueKind.DWord);
-                }
-            }
-            catch (Exception ex)
-            {
-                WriteError("Failed to create ARP registry keys (requires admin).", ex);
-            }
         }
 
         private void PrintDevices(EDataFlow flow, string label)
@@ -1461,7 +1311,6 @@ internal static class Program
         Console.WriteLine("Usage: AutoDefaultToHeadset.exe [options]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --install               Select devices, create Scheduled task, Add/Remove entry, and launch.");
         Console.WriteLine("  --list-devices          List output/input endpoint names and ids, then exit.");
         Console.WriteLine("  --match <text>          Match same exact friendly name for output and input.");
         Console.WriteLine("  --render-match <text>   Match active output device by exact friendly name (case-insensitive).");

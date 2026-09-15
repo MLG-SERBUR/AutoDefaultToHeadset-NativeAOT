@@ -1,12 +1,12 @@
 # AutoDefaultToHeadset.NativeAOT
 
-NativeAOT low-memory fork of AutoDefaultToHeadset. WinExe (no console window), exact friendly-name only, no endpoint IDs, ~8MB disk / ~10MB RAM vs ~35MB / ~30MB for self-contained.
+Low-memory fork of AutoDefaultToHeadset. WinExe (no console window), exact friendly-name only, no endpoint IDs. The current project emits a trimmed, self-contained single-file CoreCLR executable; NativeAOT needs the Visual Studio C++ linker before it can be enabled.
 
 ## Why
 
 - Endpoint IDs (`{0.0.0.00000000}.{guid}`) rotate on Bluetooth re-pair / Xbox controller reconnect → stale `exists(all)=False` → does nothing.
 - Friendly name (`Headphones (Xbox Controller)` / `Headset Microphone (Xbox Controller)`) stable → exact `Name.Equals(match, OrdinalIgnoreCase)` only.
-- NativeAOT `PublishAot` + `WinExe` + `InvariantGlobalization` + `TrimMode=partial` → no `conhost.exe`, no JIT, hidden by default.
+- `WinExe` + `InvariantGlobalization` + trimming keeps the app hidden and minimizes deployment size. NativeAOT removes JIT/runtime overhead after the C++ linker prerequisite is installed.
 
 ## Build
 
@@ -31,7 +31,7 @@ Must run `install.bat` as Administrator.
 ```cmd
 install.bat
 :: terminates running instances, copies files to W:\_programs\AutoDefaultToHeadset
-:: installs Scheduled Task (on logon, highest privileges), and registers in Add/Remove Programs
+:: install.ps1 prompts for devices, installs Scheduled Task (on logon, highest privileges), and registers Add/Remove Programs
 ```
 
 To uninstall, use **Add/Remove Programs** in Windows Settings, or run:
@@ -51,7 +51,7 @@ AutoDefaultToHeadset.NativeAOT.exe --background --render-match "Headphones (Xbox
 
 Use exact endpoint names from `--verbose --list-devices`. The configured headset output/input are watched automatically. Add Virtual Desktop output as an extra watched endpoint. When Xbox disconnects, or Windows changes away from Virtual Desktop output, the app sets both fallback endpoints.
 
-Running `install.bat` now prompts for Xbox output/input, fallback output/input, then the Virtual Desktop output endpoint. Re-run it after building to replace the Scheduled Task arguments.
+`install.bat` copies files; `install.ps1` prompts for Xbox output/input, fallback output/input, then the Virtual Desktop output endpoint. Re-run `install.bat` after building to replace the Scheduled Task arguments. The resident executable has no installer mode.
 
 ```cmd
 AutoDefaultToHeadset.NativeAOT.exe --background ^
