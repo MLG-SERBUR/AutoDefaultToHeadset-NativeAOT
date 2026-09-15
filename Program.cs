@@ -22,9 +22,18 @@ internal static class Program
     private const int ErrorAccessDenied = 5;
     private const uint WmQuit = 0x0012;
     private const uint WmApplyDefaults = 0x8000;
+    private const uint WmApplyFallbacks = WmApplyDefaults + 1;
+    private const uint WmApplyVrFallbacks = WmApplyDefaults + 2;
     private const uint PmNoRemove = 0x0000;
     private static readonly TimeSpan ReplaceExistingTimeout = TimeSpan.FromSeconds(10);
     private static bool ConsoleAvailable;
+
+    private enum EndpointAction
+    {
+        Primary,
+        Fallback,
+        VrFallback
+    }
 
     [STAThread]
     private static int Main(string[] args)
@@ -112,6 +121,9 @@ internal static class Program
                 WriteInfo("PID: " + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ". Logging: console only");
                 WriteInfo("Render match: " + options.RenderDescription);
                 WriteInfo("Capture match: " + options.CaptureDescription);
+                WriteInfo("Fallback render: " + options.FallbackRenderDescription);
+                WriteInfo("Fallback capture: " + options.FallbackCaptureDescription);
+                WriteInfo("Disconnect render watch: " + options.DisconnectRenderDescription);
                 WriteInfo("Args: " + string.Join(" ", args.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a)));
                 DumpSystemInfo();
                 controller.DumpDiagnostics("startup");
@@ -182,6 +194,18 @@ internal static class Program
                     continue;
                 }
 
+                if (message.Message == WmApplyFallbacks)
+                {
+                    controller.ApplyFallbacks("headset/VR disconnect");
+                    continue;
+                }
+
+                if (message.Message == WmApplyVrFallbacks)
+                {
+                    controller.ApplyVrFallbacks();
+                    continue;
+                }
+
                 NativeMethods.TranslateMessage(ref message);
                 NativeMethods.DispatchMessage(ref message);
             }
@@ -197,6 +221,10 @@ internal static class Program
     {
         public List<string> RenderMatches { get; } = new(DefaultRenderMatches);
         public List<string> CaptureMatches { get; } = new(DefaultCaptureMatches);
+        public List<string> FallbackRenderMatches { get; } = new();
+        public List<string> FallbackCaptureMatches { get; } = new();
+        public List<string> DisconnectRenderMatches { get; } = new();
+        public List<string> DisconnectCaptureMatches { get; } = new();
         public bool Background { get; private set; }
         public bool Verbose { get; private set; }
         public bool ReplaceExisting { get; private set; } = true;
@@ -206,6 +234,10 @@ internal static class Program
 
         public string RenderDescription => string.Join(", ", RenderMatches.Select(s => "'" + s + "'"));
         public string CaptureDescription => string.Join(", ", CaptureMatches.Select(s => "'" + s + "'"));
+        public string FallbackRenderDescription => Describe(FallbackRenderMatches);
+        public string FallbackCaptureDescription => Describe(FallbackCaptureMatches);
+        public string DisconnectRenderDescription => Describe(DisconnectRenderMatches);
+        public string DisconnectCaptureDescription => Describe(DisconnectCaptureMatches);
 
         public static Options Parse(string[] args)
         {
@@ -224,6 +256,20 @@ internal static class Program
                     case "--capture-match":
                         options.CaptureMatches.Clear();
                         options.CaptureMatches.Add(RequireValue(args, ref i, argument));
+                        break;
+                    case "--fallback-render-match":
+                        options.FallbackRenderMatches.Clear();
+                        options.FallbackRenderMatches.Add(RequireValue(args, ref i, argument));
+                        break;
+                    case "--fallback-capture-match":
+                        options.FallbackCaptureMatches.Clear();
+                        options.FallbackCaptureMatches.Add(RequireValue(args, ref i, argument));
+                        break;
+                    case "--disconnect-render-match":
+                        options.DisconnectRenderMatches.Add(RequireValue(args, ref i, argument));
+                        break;
+                    case "--disconnect-capture-match":
+                        options.DisconnectCaptureMatches.Add(RequireValue(args, ref i, argument));
                         break;
                     case "--match":
                         var match = RequireValue(args, ref i, argument);
@@ -271,6 +317,11 @@ internal static class Program
             return options;
         }
 
+        private static string Describe(IReadOnlyList<string> matches)
+        {
+            return matches.Count == 0 ? "(disabled)" : string.Join(", ", matches.Select(s => "'" + s + "'"));
+        }
+
         private static string RequireValue(string[] args, ref int index, string argument)
         {
             if (index + 1 >= args.Length)
@@ -298,6 +349,10 @@ internal static class Program
         private readonly NotificationClient _notificationClient;
         private uint _eventThreadId;
         private bool _registered;
+        private string? _lastRenderDefaultId;
+        private string? _lastCaptureDefaultId;
+        private CancellationTokenSource? _vrRetryCts;
+        private static readonly TimeSpan SteamVrRetryDelay = TimeSpan.FromMinutes(11);
 
         public AudioController(Options options)
         {
@@ -312,7 +367,7 @@ internal static class Program
             {
                 WriteInfo("PolicyConfig client: " + _policySource);
             }
-            _notificationClient = new NotificationClient(RequestEndpointApply);
+            _notificationClient = new NotificationClient(HandleDeviceStateChanged, HandleDeviceAdded, HandleDefaultDeviceChanged, RequestEndpointApply);
         }
 
         private static (IPolicyConfig? primary, IPolicyConfigVista? vista, string source) CreatePolicyConfig()
@@ -349,14 +404,22 @@ internal static class Program
             }
 
             _eventThreadId = NativeMethods.GetCurrentThreadId();
+            _lastRenderDefaultId = GetDefaultDeviceId(EDataFlow.eRender, ERole.eConsole);
+            _lastCaptureDefaultId = GetDefaultDeviceId(EDataFlow.eCapture, ERole.eConsole);
             Marshal.ThrowExceptionForHR(_enumerator.RegisterEndpointNotificationCallback(_notificationClient));
             _registered = true;
         }
 
-        private void RequestEndpointApply()
+        private void RequestEndpointApply(EndpointAction action)
         {
             var threadId = _eventThreadId;
-            if (threadId == 0 || !NativeMethods.PostThreadMessage(threadId, WmApplyDefaults, UIntPtr.Zero, IntPtr.Zero))
+            var message = action switch
+            {
+                EndpointAction.Primary => WmApplyDefaults,
+                EndpointAction.Fallback => WmApplyFallbacks,
+                _ => WmApplyVrFallbacks
+            };
+            if (threadId == 0 || !NativeMethods.PostThreadMessage(threadId, message, UIntPtr.Zero, IntPtr.Zero))
             {
                 WriteError("Failed to queue endpoint apply. Win32 error: " + Marshal.GetLastWin32Error().ToString(CultureInfo.InvariantCulture));
             }
@@ -437,6 +500,183 @@ internal static class Program
             {
                 WriteError("Failed to apply defaults from " + source + ".", ex);
             }
+        }
+
+        public void ApplyFallbacks(string source)
+        {
+            try
+            {
+                var render = FindBestDevice(EDataFlow.eRender, _options.FallbackRenderMatches);
+                var capture = FindBestDevice(EDataFlow.eCapture, _options.FallbackCaptureMatches);
+
+                if (render != null)
+                {
+                    WriteInfo("Matched fallback render for " + source + ": " + render.Name + " [" + render.State + "] " + render.Id);
+                    SetDefaultForAllRoles(render, source);
+                }
+                else if (_options.FallbackRenderMatches.Count > 0)
+                {
+                    WriteInfo("No active fallback render matched " + _options.FallbackRenderDescription + ".");
+                }
+
+                if (capture != null)
+                {
+                    WriteInfo("Matched fallback capture for " + source + ": " + capture.Name + " [" + capture.State + "] " + capture.Id);
+                    SetDefaultForAllRoles(capture, source);
+                }
+                else if (_options.FallbackCaptureMatches.Count > 0)
+                {
+                    WriteInfo("No active fallback capture matched " + _options.FallbackCaptureDescription + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteError("Failed to apply fallback defaults from " + source + ".", ex);
+            }
+        }
+
+        public void ApplyVrFallbacks()
+        {
+            if (IsSteamVrRunning())
+            {
+                WriteInfo("Virtual Desktop output left default, but vrserver.exe is running. Retrying fallback in 11 minutes.");
+                ScheduleVrFallbackRetry();
+                return;
+            }
+
+            ApplyFallbacks("Virtual Desktop disconnect after SteamVR exit");
+        }
+
+        private static bool IsSteamVrRunning()
+        {
+            foreach (var process in Process.GetProcessesByName("vrserver"))
+            {
+                process.Dispose();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void ScheduleVrFallbackRetry()
+        {
+            var previous = _vrRetryCts;
+            var current = new CancellationTokenSource();
+            _vrRetryCts = current;
+            try { previous?.Cancel(); } catch { }
+            previous?.Dispose();
+
+            var token = current.Token;
+            Task.Delay(SteamVrRetryDelay, token).ContinueWith(task =>
+            {
+                if (!task.IsCanceled) RequestEndpointApply(EndpointAction.VrFallback);
+            }, TaskScheduler.Default);
+        }
+
+        private void CancelVrFallbackRetry()
+        {
+            var retry = _vrRetryCts;
+            _vrRetryCts = null;
+            try { retry?.Cancel(); } catch { }
+            retry?.Dispose();
+        }
+
+        private EndpointAction? HandleDeviceStateChanged(string deviceId, DeviceState newState)
+        {
+            var name = TryGetFriendlyNameById(deviceId);
+            if (name == null)
+            {
+                return null;
+            }
+
+            if (newState == DeviceState.Active && IsVrDisconnectSource(name))
+            {
+                CancelVrFallbackRetry();
+                return null;
+            }
+
+            if (newState == DeviceState.Active && IsPrimaryDevice(name))
+            {
+                return EndpointAction.Primary;
+            }
+
+            if (newState != DeviceState.Active && IsVrDisconnectSource(name))
+            {
+                return EndpointAction.VrFallback;
+            }
+
+            if (newState != DeviceState.Active && IsDisconnectSource(name))
+            {
+                return EndpointAction.Fallback;
+            }
+
+            return null;
+        }
+
+        private EndpointAction? HandleDeviceAdded(string deviceId)
+        {
+            var name = TryGetFriendlyNameById(deviceId);
+            return name != null && IsPrimaryDevice(name) ? EndpointAction.Primary : null;
+        }
+
+        private EndpointAction? HandleDefaultDeviceChanged(EDataFlow flow, string? newDefaultDeviceId)
+        {
+            if (IsVrDisconnectSourceId(newDefaultDeviceId, flow))
+            {
+                CancelVrFallbackRetry();
+            }
+
+            if (flow == EDataFlow.eRender)
+            {
+                var previous = _lastRenderDefaultId;
+                _lastRenderDefaultId = newDefaultDeviceId;
+                return IsVrDisconnectSourceId(previous, EDataFlow.eRender) ? EndpointAction.VrFallback :
+                       IsDisconnectSourceId(previous, EDataFlow.eRender) ? EndpointAction.Fallback : null;
+            }
+
+            if (flow == EDataFlow.eCapture)
+            {
+                var previous = _lastCaptureDefaultId;
+                _lastCaptureDefaultId = newDefaultDeviceId;
+                return IsVrDisconnectSourceId(previous, EDataFlow.eCapture) ? EndpointAction.VrFallback :
+                       IsDisconnectSourceId(previous, EDataFlow.eCapture) ? EndpointAction.Fallback : null;
+            }
+
+            return null;
+        }
+
+        private bool IsDisconnectSourceId(string? deviceId, EDataFlow flow)
+        {
+            var name = deviceId == null ? null : TryGetFriendlyNameById(deviceId);
+            return name != null && IsDisconnectSource(name, flow);
+        }
+
+        private bool IsVrDisconnectSourceId(string? deviceId, EDataFlow flow)
+        {
+            var name = deviceId == null ? null : TryGetFriendlyNameById(deviceId);
+            return name != null && IsVrDisconnectSource(name, flow);
+        }
+
+        private bool IsPrimaryDevice(string name)
+        {
+            return Matches(name, _options.RenderMatches) || Matches(name, _options.CaptureMatches);
+        }
+
+        private bool IsDisconnectSource(string name, EDataFlow? flow = null)
+        {
+            return (flow != EDataFlow.eCapture && (Matches(name, _options.RenderMatches) || Matches(name, _options.DisconnectRenderMatches))) ||
+                   (flow != EDataFlow.eRender && (Matches(name, _options.CaptureMatches) || Matches(name, _options.DisconnectCaptureMatches)));
+        }
+
+        private bool IsVrDisconnectSource(string name, EDataFlow? flow = null)
+        {
+            return (flow != EDataFlow.eCapture && Matches(name, _options.DisconnectRenderMatches)) ||
+                   (flow != EDataFlow.eRender && Matches(name, _options.DisconnectCaptureMatches));
+        }
+
+        private static bool Matches(string name, IReadOnlyList<string> matches)
+        {
+            return matches.Any(match => name.Equals(match, StringComparison.OrdinalIgnoreCase));
         }
 
         private void LogCurrentDefaults(string context)
@@ -538,15 +778,28 @@ internal static class Program
 
             var render = PromptForDevice("output", renderDevices);
             var capture = PromptForDevice("input", captureDevices);
+            var fallbackRender = PromptForDevice("fallback output", renderDevices);
+            var fallbackCapture = PromptForDevice("fallback input", captureDevices);
+            var disconnectRender = PromptForDevice("Virtual Desktop output to watch for disconnect", renderDevices);
 
             // exact name only, no ID mode
             var renderMatch = render.Name;
             var captureMatch = capture.Name;
+            var fallbackRenderMatch = fallbackRender.Name;
+            var fallbackCaptureMatch = fallbackCapture.Name;
+            var disconnectRenderMatch = disconnectRender.Name;
             Console.WriteLine();
             Console.WriteLine("Using exact friendly name (persistent):");
             Console.WriteLine("  Render: " + renderMatch);
             Console.WriteLine("  Capture: " + captureMatch);
-            var arguments = "--background --render-match " + Quote(renderMatch) + " --capture-match " + Quote(captureMatch);
+            Console.WriteLine("  Fallback render: " + fallbackRenderMatch);
+            Console.WriteLine("  Fallback capture: " + fallbackCaptureMatch);
+            Console.WriteLine("  Disconnect render watch: " + disconnectRenderMatch);
+            var arguments = "--background --render-match " + Quote(renderMatch) +
+                            " --capture-match " + Quote(captureMatch) +
+                            " --fallback-render-match " + Quote(fallbackRenderMatch) +
+                            " --fallback-capture-match " + Quote(fallbackCaptureMatch) +
+                            " --disconnect-render-match " + Quote(disconnectRenderMatch);
 
             var exePath = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(exePath))
@@ -805,12 +1058,16 @@ internal static class Program
         public void Dispose()
         {
             UnregisterNotifications();
+            CancelVrFallbackRetry();
         }
     }
 
     private sealed class NotificationClient : IMMNotificationClient
     {
-        private readonly Action _onChanged;
+        private readonly Func<string, DeviceState, EndpointAction?> _onDeviceStateChanged;
+        private readonly Func<string, EndpointAction?> _onDeviceAdded;
+        private readonly Func<EDataFlow, string?, EndpointAction?> _onDefaultDeviceChanged;
+        private readonly Action<EndpointAction> _onApply;
         private readonly object _gate = new();
         private DateTimeOffset _lastRun = DateTimeOffset.MinValue;
         private CancellationTokenSource? _pendingCts;
@@ -819,25 +1076,31 @@ internal static class Program
         private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(700);
         private static readonly TimeSpan MinInterval = TimeSpan.FromMilliseconds(250);
 
-        public NotificationClient(Action onChanged)
+        public NotificationClient(
+            Func<string, DeviceState, EndpointAction?> onDeviceStateChanged,
+            Func<string, EndpointAction?> onDeviceAdded,
+            Func<EDataFlow, string?, EndpointAction?> onDefaultDeviceChanged,
+            Action<EndpointAction> onApply)
         {
-            _onChanged = onChanged;
+            _onDeviceStateChanged = onDeviceStateChanged;
+            _onDeviceAdded = onDeviceAdded;
+            _onDefaultDeviceChanged = onDefaultDeviceChanged;
+            _onApply = onApply;
         }
 
         public int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, DeviceState newState)
         {
             WriteInfo("Notify OnDeviceStateChanged: " + newState + " id=" + deviceId);
-            if (newState == DeviceState.Active)
-            {
-                RunDebounced();
-            }
+            var fallback = _onDeviceStateChanged(deviceId, newState);
+            if (fallback.HasValue) RunDebounced(fallback.Value);
             return 0;
         }
 
         public int OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string deviceId)
         {
             WriteInfo("Notify OnDeviceAdded: id=" + deviceId);
-            RunDebounced();
+            var fallback = _onDeviceAdded(deviceId);
+            if (fallback.HasValue) RunDebounced(fallback.Value);
             return 0;
         }
 
@@ -849,18 +1112,18 @@ internal static class Program
 
         public int OnDefaultDeviceChanged(EDataFlow flow, ERole role, [MarshalAs(UnmanagedType.LPWStr)] string? defaultDeviceId)
         {
-            // ignore - avoids feedback loop when we just set default
+            var fallback = _onDefaultDeviceChanged(flow, defaultDeviceId);
+            if (fallback.HasValue) RunDebounced(fallback.Value);
             return 0;
         }
 
         public int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, ref PropertyKey key)
         {
             WriteInfo("Notify OnPropertyValueChanged: id=" + deviceId);
-            RunDebounced();
             return 0;
         }
 
-        private void RunDebounced()
+        private void RunDebounced(EndpointAction action)
         {
             bool shouldFireImmediately = false;
             CancellationTokenSource? ctsToCancel = null;
@@ -887,7 +1150,7 @@ internal static class Program
 
             if (shouldFireImmediately)
             {
-                try { _onChanged(); } catch (Exception ex) { WriteError("RunDebounced immediate failed", ex); }
+                try { RequestApply(action); } catch (Exception ex) { WriteError("RunDebounced immediate failed", ex); }
             }
 
             // trailing edge after CoalesceWindow - ensures second device in burst gets applied
@@ -899,8 +1162,13 @@ internal static class Program
                 {
                     // if another burst already updated _lastRun recently, we still fire trailing to ensure both render+capture handled
                 }
-                try { _onChanged(); } catch (Exception ex) { WriteError("RunDebounced trailing failed", ex); }
+                try { RequestApply(action); } catch (Exception ex) { WriteError("RunDebounced trailing failed", ex); }
             }, TaskScheduler.Default);
+        }
+
+        private void RequestApply(EndpointAction action)
+        {
+            _onApply(action);
         }
     }
 
@@ -1180,6 +1448,10 @@ internal static class Program
         Console.WriteLine("  --match <text>          Match same exact friendly name for output and input.");
         Console.WriteLine("  --render-match <text>   Match active output device by exact friendly name (case-insensitive).");
         Console.WriteLine("  --capture-match <text>  Match active input device by exact friendly name.");
+        Console.WriteLine("  --fallback-render-match <text>  Set this output when a watched device disconnects.");
+        Console.WriteLine("  --fallback-capture-match <text> Set this input when a watched device disconnects.");
+        Console.WriteLine("  --disconnect-render-match <text> Watch extra output, e.g. Virtual Desktop Audio.");
+        Console.WriteLine("  --disconnect-capture-match <text> Watch extra input device.");
         Console.WriteLine("  --background            Run without opening a console window (NativeAOT: hidden by default).");
         Console.WriteLine("  --verbose               Allocate console for diagnostics (NativeAOT WinExe).");
         Console.WriteLine("  --replace-existing      Replace a running switcher instance (default).");

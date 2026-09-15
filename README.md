@@ -47,6 +47,23 @@ AutoDefaultToHeadset.NativeAOT.exe --verbose --list-devices  :: diagnostics with
 AutoDefaultToHeadset.NativeAOT.exe --background --render-match "Headphones (Xbox Controller)" --capture-match "Headset Microphone (Xbox Controller)"
 ```
 
+## Xbox / VR disconnect fallback
+
+Use exact endpoint names from `--verbose --list-devices`. The configured headset output/input are watched automatically. Add Virtual Desktop output as an extra watched endpoint. When Xbox disconnects, or Windows changes away from Virtual Desktop output, the app sets both fallback endpoints.
+
+Running `install.bat` now prompts for Xbox output/input, fallback output/input, then the Virtual Desktop output endpoint. Re-run it after building to replace the Scheduled Task arguments.
+
+```cmd
+AutoDefaultToHeadset.NativeAOT.exe --background ^
+  --render-match "Headphones (Xbox Controller)" ^
+  --capture-match "Headset Microphone (Xbox Controller)" ^
+  --disconnect-render-match "Virtual Desktop Audio" ^
+  --fallback-render-match "PIXIO" ^
+  --fallback-capture-match "Jouvino"
+```
+
+This uses existing Core Audio endpoint callbacks and cached endpoint IDs. When Virtual Desktop output leaves default, it checks `vrserver.exe` once. If SteamVR remains active, it waits 11 minutes and checks again; it only changes to PIXIO/Jouvino after `vrserver.exe` exits. Virtual Desktop recovery cancels the pending fallback. No polling, WMI watcher, or persistent process scan. `--disconnect-capture-match` exists for VR setups where input also has a reliable endpoint-state change; Virtual Desktop output switching alone triggers both fallback output and input.
+
 Diagnostics (verbose allocates console):
 
 ```
