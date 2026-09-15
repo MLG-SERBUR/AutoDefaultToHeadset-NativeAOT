@@ -79,10 +79,14 @@ On newer Windows 11 builds (24H2 / build 26100+), the undocumented `IPolicyConfi
 
 **Solution:** Use Windows Task Scheduler. The installer automatically creates a task to run the app at logon with `/RL HIGHEST` inside the user session, bypassing UAC while retaining audio device access.
 
-## Memory
+## Measured memory
 
-| Variant | Disk | WorkingSet |
-|---------|------|------------|
-| Self-contained (console+WinForms) | ~40MB | ~30MB + conhost 5MB |
-| NativeAOT WinExe (this) | ~8MB | ~10MB, no window |
+Measured on this machine after startup, using Task Manager process values. MiB values use 1,048,576 bytes.
+
+| Build | Executable | Working Set | Private / commit |
+|---|---:|---:|---:|
+| Before: trimmed single-file CoreCLR | 12.4 MB | 24.9 MiB | 6.9 MiB |
+| After: NativeAOT WinExe | 2.58 MB | 19.54 MiB | 8.93 MiB |
+
+NativeAOT reduced executable size and startup/runtime overhead. Private commit remains below 10 MiB. Working Set did not reach the <10 MiB target; Windows audio and COM pages account for much of the resident memory.
 

@@ -5,13 +5,14 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 using System.Threading;
 using System.Threading.Tasks;
 // no WinForms for NativeAOT
 
 namespace AutoDefaultToHeadset;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly string[] DefaultRenderMatches = Array.Empty<string>();
     private static readonly string[] DefaultCaptureMatches = Array.Empty<string>();
@@ -346,7 +347,7 @@ internal static class Program
         public AudioController(Options options)
         {
             _options = options;
-            _enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(Type.GetTypeFromCLSID(ComIds.MMDeviceEnumerator, throwOnError: true)!)!;
+            _enumerator = CreateComInstance<IMMDeviceEnumerator>(ComIds.MMDeviceEnumerator, ComIds.IMMDeviceEnumerator);
             (_policyConfig, _policyConfigVista, _policySource) = CreatePolicyConfig();
             if (_policyConfig == null && _policyConfigVista == null)
             {
@@ -364,7 +365,7 @@ internal static class Program
             // Try primary client (Win7-11) first, then Vista client as fallback.
             try
             {
-                var pc = (IPolicyConfig)Activator.CreateInstance(Type.GetTypeFromCLSID(ComIds.PolicyConfigClient, throwOnError: true)!)!;
+                var pc = CreateComInstance<IPolicyConfig>(ComIds.PolicyConfigClient, ComIds.IPolicyConfig);
                 return (pc, null, "CPolicyConfigClient(870AF99C)+IPolicyConfig(F8679F50)");
             }
             catch (Exception ex)
@@ -374,7 +375,7 @@ internal static class Program
 
             try
             {
-                var vista = (IPolicyConfigVista)Activator.CreateInstance(Type.GetTypeFromCLSID(ComIds.PolicyConfigVistaClient, throwOnError: true)!)!;
+                var vista = CreateComInstance<IPolicyConfigVista>(ComIds.PolicyConfigVistaClient, ComIds.IPolicyConfigVista);
                 return (null, vista, "CPolicyConfigVistaClient(294935CE)+IPolicyConfigVista(568B9108)");
             }
             catch (Exception ex)
@@ -383,6 +384,22 @@ internal static class Program
             }
 
             return (null, null, "none");
+        }
+
+        private static readonly ComWrappers ComWrappers = new StrategyBasedComWrappers();
+
+        private static T CreateComInstance<T>(Guid classId, Guid interfaceId) where T : class
+        {
+            var hr = NativeMethods.CoCreateInstance(
+                ref classId,
+                IntPtr.Zero,
+                NativeMethods.ClsctxInprocServer,
+                ref interfaceId,
+                out var interfacePointer);
+            Marshal.ThrowExceptionForHR(hr);
+
+            // ComWrappers takes ownership of the COM reference returned by CoCreateInstance.
+            return (T)ComWrappers.GetOrCreateObjectForComInstance(interfacePointer, CreateObjectFlags.None);
         }
 
         public void RegisterNotifications()
@@ -930,7 +947,8 @@ internal static class Program
         }
     }
 
-    private sealed class NotificationClient : IMMNotificationClient
+    [GeneratedComClass]
+    private sealed partial class NotificationClient : IMMNotificationClient
     {
         private readonly Func<string, DeviceState, EndpointAction?> _onDeviceStateChanged;
         private readonly Func<string, EndpointAction?> _onDeviceAdded;
@@ -1492,16 +1510,17 @@ internal enum StorageAccessMode
 internal static class ComIds
 {
     public static readonly Guid MMDeviceEnumerator = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
+    public static readonly Guid IMMDeviceEnumerator = new("A95664D2-9614-4F35-A746-DE8DB63617E6");
     public static readonly Guid PolicyConfigClient = new("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9");
     public static readonly Guid PolicyConfigVistaClient = new("294935CE-F637-4E7C-A41B-AB255460B862");
     public static readonly Guid IPolicyConfig = new("F8679F50-850A-41CF-9C72-430F290290C8");
     public static readonly Guid IPolicyConfigVista = new("568B9108-44BF-40B4-9006-86AFE5B5A620");
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IMMDeviceEnumerator
+internal partial interface IMMDeviceEnumerator
 {
     [PreserveSig]
     int EnumAudioEndpoints(EDataFlow dataFlow, DeviceState stateMask, out IMMDeviceCollection devices);
@@ -1519,10 +1538,10 @@ internal interface IMMDeviceEnumerator
     int UnregisterEndpointNotificationCallback(IMMNotificationClient client);
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IMMDeviceCollection
+internal partial interface IMMDeviceCollection
 {
     [PreserveSig]
     int GetCount(out uint count);
@@ -1531,10 +1550,10 @@ internal interface IMMDeviceCollection
     int Item(uint index, out IMMDevice device);
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("D666063F-1587-4E43-81F1-B948E807363F")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IMMDevice
+internal partial interface IMMDevice
 {
     [PreserveSig]
     int Activate(ref Guid iid, uint clsCtx, IntPtr activationParams, out IntPtr interfacePointer);
@@ -1549,10 +1568,10 @@ internal interface IMMDevice
     int GetState(out DeviceState state);
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal unsafe interface IPropertyStore
+internal unsafe partial interface IPropertyStore
 {
     [PreserveSig]
     int GetCount(out uint propertyCount);
@@ -1570,10 +1589,10 @@ internal unsafe interface IPropertyStore
     int Commit();
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IMMNotificationClient
+internal partial interface IMMNotificationClient
 {
     [PreserveSig]
     int OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, DeviceState newState);
@@ -1591,10 +1610,10 @@ internal interface IMMNotificationClient
     int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, ref PropertyKey key);
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("F8679F50-850A-41CF-9C72-430F290290C8")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IPolicyConfig
+internal partial interface IPolicyConfig
 {
     [PreserveSig]
     int GetMixFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, IntPtr ppFormat);
@@ -1633,10 +1652,10 @@ internal interface IPolicyConfig
     int SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, [MarshalAs(UnmanagedType.Bool)] bool bVisible);
 }
 
-[ComImport]
+[GeneratedComInterface]
 [Guid("568B9108-44BF-40B4-9006-86AFE5B5A620")]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal interface IPolicyConfigVista
+internal partial interface IPolicyConfigVista
 {
     [PreserveSig]
     int GetMixFormat([MarshalAs(UnmanagedType.LPWStr)] string pszDeviceName, IntPtr ppFormat);
@@ -1674,6 +1693,16 @@ internal interface IPolicyConfigVista
 
 internal static class NativeMethods
 {
+    public const uint ClsctxInprocServer = 0x1;
+
+    [DllImport("ole32.dll")]
+    public static extern int CoCreateInstance(
+        ref Guid rclsid,
+        IntPtr pUnkOuter,
+        uint dwClsContext,
+        ref Guid riid,
+        out IntPtr ppv);
+
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
