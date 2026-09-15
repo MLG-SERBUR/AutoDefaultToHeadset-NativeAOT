@@ -606,6 +606,14 @@ internal static partial class Program
                 return EndpointAction.Primary;
             }
 
+            // Windows can expose several endpoint IDs with one friendly name.
+            // Ignore a non-active event while another endpoint with that name is active;
+            // otherwise a connect burst can apply the headset and then its fallback.
+            if (newState != DeviceState.Active && IsPrimaryDevice(name) && HasActiveEndpointNamed(name))
+            {
+                return null;
+            }
+
             if (newState != DeviceState.Active && IsVrDisconnectSource(name))
             {
                 return EndpointAction.VrFallback;
@@ -619,6 +627,20 @@ internal static partial class Program
             return null;
         }
 
+        private bool HasActiveEndpointNamed(string name)
+        {
+            try
+            {
+                return EnumerateDevices(EDataFlow.eRender, DeviceState.Active)
+                           .Concat(EnumerateDevices(EDataFlow.eCapture, DeviceState.Active))
+                           .Any(device => device.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private EndpointAction? HandleDeviceAdded(string deviceId)
         {
             var name = TryGetFriendlyNameById(deviceId);
@@ -630,6 +652,14 @@ internal static partial class Program
             if (IsVrDisconnectSourceId(newDefaultDeviceId, flow))
             {
                 CancelVrFallbackRetry();
+            }
+
+            // A primary apply can intentionally move the default away from the
+            // watched VR endpoint. Do not interpret that expected transition as
+            // a VR disconnect and immediately apply the fallback.
+            if (IsPrimaryDeviceId(newDefaultDeviceId, flow))
+            {
+                return null;
             }
 
             if (flow == EDataFlow.eRender)
@@ -649,6 +679,15 @@ internal static partial class Program
             }
 
             return null;
+        }
+
+        private bool IsPrimaryDeviceId(string? deviceId, EDataFlow flow)
+        {
+            var name = deviceId == null ? null : TryGetFriendlyNameById(deviceId);
+            return name != null &&
+                   (flow == EDataFlow.eRender
+                       ? Matches(name, _options.RenderMatches)
+                       : Matches(name, _options.CaptureMatches));
         }
 
         private bool IsDisconnectSourceId(string? deviceId, EDataFlow flow)
