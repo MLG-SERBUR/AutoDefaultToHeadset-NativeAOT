@@ -341,8 +341,7 @@ internal static partial class Program
         private bool _registered;
         private string? _lastRenderDefaultId;
         private string? _lastCaptureDefaultId;
-        private CancellationTokenSource? _vrRetryCts;
-        private static readonly TimeSpan SteamVrRetryDelay = TimeSpan.FromMinutes(11);
+        private Process? _steamVrExitMonitor;
 
         public AudioController(Options options)
         {
@@ -543,48 +542,56 @@ internal static partial class Program
 
         public void ApplyVrFallbacks()
         {
-            if (IsSteamVrRunning())
+            var steamVr = FindSteamVrProcess();
+            if (steamVr != null)
             {
-                WriteInfo("Virtual Desktop output left default, but vrserver.exe is running. Retrying fallback in 11 minutes.");
-                ScheduleVrFallbackRetry();
+                WriteInfo("Virtual Desktop output disabled, but vrserver.exe is running. Waiting for SteamVR exit.");
+                MonitorSteamVrExit(steamVr);
                 return;
             }
 
             ApplyFallbacks("Virtual Desktop disconnect after SteamVR exit");
         }
 
-        private static bool IsSteamVrRunning()
+        private static Process? FindSteamVrProcess()
         {
             foreach (var process in Process.GetProcessesByName("vrserver"))
             {
-                process.Dispose();
-                return true;
+                return process;
             }
 
-            return false;
+            return null;
         }
 
-        private void ScheduleVrFallbackRetry()
+        private void MonitorSteamVrExit(Process process)
         {
-            var previous = _vrRetryCts;
-            var current = new CancellationTokenSource();
-            _vrRetryCts = current;
-            try { previous?.Cancel(); } catch { }
-            previous?.Dispose();
+            StopSteamVrExitMonitor();
+            _steamVrExitMonitor = process;
+            process.EnableRaisingEvents = true;
+            process.Exited += OnSteamVrExited;
+        }
 
-            var token = current.Token;
-            Task.Delay(SteamVrRetryDelay, token).ContinueWith(task =>
+        private void OnSteamVrExited(object? sender, EventArgs e)
+        {
+            if (sender is Process process)
             {
-                if (!task.IsCanceled) RequestEndpointApply(EndpointAction.VrFallback);
-            }, TaskScheduler.Default);
+                process.Exited -= OnSteamVrExited;
+            }
+
+            RequestEndpointApply(EndpointAction.VrFallback);
         }
 
-        private void CancelVrFallbackRetry()
+        private void StopSteamVrExitMonitor()
         {
-            var retry = _vrRetryCts;
-            _vrRetryCts = null;
-            try { retry?.Cancel(); } catch { }
-            retry?.Dispose();
+            var process = _steamVrExitMonitor;
+            _steamVrExitMonitor = null;
+            if (process == null)
+            {
+                return;
+            }
+
+            try { process.Exited -= OnSteamVrExited; } catch { }
+            process.Dispose();
         }
 
         private EndpointAction? HandleDeviceStateChanged(string deviceId, DeviceState newState)
@@ -597,7 +604,7 @@ internal static partial class Program
 
             if (newState == DeviceState.Active && IsVrDisconnectSource(name))
             {
-                CancelVrFallbackRetry();
+                StopSteamVrExitMonitor();
                 return null;
             }
 
@@ -977,7 +984,7 @@ internal static partial class Program
         public void Dispose()
         {
             UnregisterNotifications();
-            CancelVrFallbackRetry();
+            StopSteamVrExitMonitor();
         }
     }
 
