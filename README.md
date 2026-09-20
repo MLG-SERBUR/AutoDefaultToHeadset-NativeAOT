@@ -62,7 +62,7 @@ AutoDefaultToHeadset.NativeAOT.exe --background ^
   --fallback-capture-match "Jouvino"
 ```
 
-This uses existing Core Audio endpoint callbacks and cached endpoint IDs. When Virtual Desktop output leaves default or becomes inactive/disabled, it checks `vrserver.exe` once. If SteamVR remains active, it waits 11 minutes and checks again; it only changes to PIXIO/Jouvino after `vrserver.exe` exits. Virtual Desktop recovery cancels the pending fallback. No polling, WMI watcher, or persistent process scan. `--disconnect-capture-match` exists for VR setups where input also has a reliable endpoint-state change; Virtual Desktop output state changes alone trigger both fallback output and input.
+This uses existing Core Audio endpoint callbacks and cached endpoint IDs. Virtual Desktop default changes alone cause no action. When Virtual Desktop output becomes inactive/disabled, it checks `vrserver.exe` once. If SteamVR remains active, it waits 11 minutes and checks again; it only changes to PIXIO/Jouvino after `vrserver.exe` exits. Virtual Desktop recovery cancels the pending fallback. No polling, WMI watcher, or persistent process scan. `--disconnect-capture-match` exists for VR setups where input also has a reliable endpoint-state change; Virtual Desktop output state changes alone trigger both fallback output and input.
 
 Diagnostics (verbose allocates console):
 

@@ -649,11 +649,6 @@ internal static partial class Program
 
         private EndpointAction? HandleDefaultDeviceChanged(EDataFlow flow, string? newDefaultDeviceId)
         {
-            if (IsVrDisconnectSourceId(newDefaultDeviceId, flow))
-            {
-                CancelVrFallbackRetry();
-            }
-
             // A primary apply can intentionally move the default away from the
             // watched VR endpoint. Do not interpret that expected transition as
             // a VR disconnect and immediately apply the fallback.
@@ -666,16 +661,16 @@ internal static partial class Program
             {
                 var previous = _lastRenderDefaultId;
                 _lastRenderDefaultId = newDefaultDeviceId;
-                return IsVrDisconnectSourceId(previous, EDataFlow.eRender) ? EndpointAction.VrFallback :
-                       IsDisconnectSourceId(previous, EDataFlow.eRender) ? EndpointAction.Fallback : null;
+                return IsDisconnectSourceId(previous, EDataFlow.eRender) &&
+                       !IsVrDisconnectSourceId(previous, EDataFlow.eRender) ? EndpointAction.Fallback : null;
             }
 
             if (flow == EDataFlow.eCapture)
             {
                 var previous = _lastCaptureDefaultId;
                 _lastCaptureDefaultId = newDefaultDeviceId;
-                return IsVrDisconnectSourceId(previous, EDataFlow.eCapture) ? EndpointAction.VrFallback :
-                       IsDisconnectSourceId(previous, EDataFlow.eCapture) ? EndpointAction.Fallback : null;
+                return IsDisconnectSourceId(previous, EDataFlow.eCapture) &&
+                       !IsVrDisconnectSourceId(previous, EDataFlow.eCapture) ? EndpointAction.Fallback : null;
             }
 
             return null;
