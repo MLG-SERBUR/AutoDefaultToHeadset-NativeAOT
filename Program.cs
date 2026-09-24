@@ -566,22 +566,31 @@ internal static partial class Program
         private void MonitorSteamVrExit(Process process)
         {
             StopSteamVrExitMonitor();
-            _steamVrExitMonitor = process;
-            process.Exited += OnSteamVrExited;
-
-            // vrserver can exit between FindSteamVrProcess and this setup.
-            // EnableRaisingEvents throws in that race instead of raising Exited.
             try
             {
+                // vrserver can exit during any part of setup. Process event hookup
+                // opens a process handle, so both hookup and EnableRaisingEvents
+                // can throw after the process has exited.
+                _steamVrExitMonitor = process;
+                process.Exited += OnSteamVrExited;
                 process.EnableRaisingEvents = true;
             }
             catch (InvalidOperationException)
             {
-                process.Exited -= OnSteamVrExited;
-                _steamVrExitMonitor = null;
-                process.Dispose();
+                ClearSteamVrExitMonitor(process);
                 RequestEndpointApply(EndpointAction.VrFallback);
             }
+        }
+
+        private void ClearSteamVrExitMonitor(Process process)
+        {
+            if (ReferenceEquals(_steamVrExitMonitor, process))
+            {
+                _steamVrExitMonitor = null;
+            }
+
+            try { process.Exited -= OnSteamVrExited; } catch { }
+            process.Dispose();
         }
 
         private void OnSteamVrExited(object? sender, EventArgs e)
